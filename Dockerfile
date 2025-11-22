@@ -1,20 +1,12 @@
-FROM node:20-bullseye
+FROM node:20-slim
 
-# Puppeteer dependencies
 RUN apt-get update && apt-get install -y \
     chromium \
-    chromium-common \
     chromium-driver \
     fonts-liberation \
-    libappindicator3-1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
@@ -23,6 +15,6 @@ RUN npm install
 
 COPY . .
 
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+EXPOSE 10000
 
-CMD ["node", "server.js"]
+CMD ["npm", "start"]
