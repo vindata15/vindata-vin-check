@@ -1,59 +1,35 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>VINDATA.ca VIN Lookup</title>
-
 <style>
-    body {
-        font-family: system-ui, Arial;
-        background: #f5f7fb;
-        margin: 0;
-        padding: 40px;
-        text-align: center;
-    }
-
-    h1 {
-        font-size: 28px;
-        margin-bottom: 30px;
-    }
-
-    input {
-        width: 60%;
-        max-width: 600px;
-        padding: 14px;
-        margin-bottom: 12px;
-        border-radius: 6px;
-        border: 1px solid #d0d0d0;
-        font-size: 18px;
-        background: #e8f0fe;
-    }
-
-    button {
-        width: 60%;
-        max-width: 600px;
-        padding: 14px;
-        background: #006aff;
-        color: white;
-        font-size: 18px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-    }
-
-    button:hover {
-        background: #0053cf;
-    }
-
-    #result {
-        margin-top: 20px;
-        font-size: 16px;
-        color: red;
-    }
+  body {
+    font-family: Arial;
+    text-align: center;
+    padding: 60px;
+    background: #f4f7ff;
+  }
+  input {
+    width: 60%;
+    padding: 14px;
+    margin: 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+  }
+  button {
+    width: 60%;
+    padding: 16px;
+    background: #0066ff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    cursor: pointer;
+  }
 </style>
 </head>
-
 <body>
 
 <h1>VINDATA.ca VIN Lookup</h1>
@@ -63,39 +39,33 @@
 
 <button onclick="checkVIN()">Check VIN</button>
 
-<div id="result"></div>
-
 <script>
 async function checkVIN() {
-    const vin = document.getElementById("vin").value.trim();
-    const email = document.getElementById("email").value.trim();
-    const result = document.getElementById("result");
+  const vin = document.getElementById("vin").value.trim();
+  const email = document.getElementById("email").value.trim();
 
-    if (!vin || !email) {
-        result.innerHTML = "Please enter both VIN and Email.";
-        return;
-    }
+  if (!vin || vin.length !== 17) {
+    alert("Enter a valid 17-digit VIN");
+    return;
+  }
+  if (!email) {
+    alert("Enter your email");
+    return;
+  }
 
-    result.innerHTML = "Processing...";
+  // Now match backend route EXACTLY
+  const resp = await fetch("/api/create-checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vin, email })
+  });
 
-    try {
-        const response = await fetch("/create-checkout-session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ vin, email })
-        });
-
-        const data = await response.json();
-
-        if (data.url) {
-            window.location.href = data.url; // Redirect to Stripe checkout
-        } else {
-            result.innerHTML = "Error: " + data.error;
-        }
-
-    } catch (err) {
-        result.innerHTML = "Request failed.";
-    }
+  const j = await resp.json();
+  if (j.url) {
+    window.location.href = j.url;
+  } else {
+    alert("Checkout failed: " + JSON.stringify(j));
+  }
 }
 </script>
 
