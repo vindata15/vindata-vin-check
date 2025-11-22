@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+5
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vindata VIN Check</title>
+<style>
+body { font-family: system-ui, Arial; max-width:720px; margin:32px auto;
+padding:0 16px }
+input, button { padding:10px; font-size:16px; }
+.small { color:#555; font-size:14px }
+</style>
+</head>
+<body>
+<h1>Vindata VIN Check</h1>
+<p class="small">Enter VIN to see make & model. After payment we'll email
+the Carfax-style report to you.</p>
+<label>VIN</label>
+<input id="vin" placeholder="Enter VIN" />
+<label style="margin-top:8px;display:block">Your email</label>
+<input id="email" placeholder="you@example.com" />
+<div style="height:12px"></div>
+<button id="checkBtn">Check VIN</button>
+<div id="result" style="margin-top:16px"></div>
+<script>
+document.getElementById('checkBtn').addEventListener('click', async ()
+=> {
+const vin = document.getElementById('vin').value.trim();
+const email = document.getElementById('email').value.trim();
+if (!vin || !email) return alert('Please enter VIN and email');
+document.getElementById('result').innerText = 'Looking up VIN...';
+try {
+const r = await fetch(`/api/lookup/${encodeURIComponent(vin)}`);
+const j = await r.json();
+if (!j.success) return document.getElementById('result').innerText =
+'Lookup failed';
+const dec = j.decode;
+document.getElementById('result').innerHTML = `
+ <p><strong>Make:</strong> ${dec.make || 'Unknown'} <strong>Model:</
+strong> ${dec.model || ''} <strong>Year:</strong> ${dec.year || ''}</p>
+ <p class="small">Price to get full Carfax report: configured in
+Stripe</p>
+ <button id="payBtn">Pay & Get Carfax Report</button>`;
+document.getElementById('payBtn').addEventListener('click', async ()
+=> {
+document.getElementById('result').innerText = 'Creating
+checkout...';
+const create = await fetch('/api/create-checkout', {
+method: 'POST',
+6
+headers: {'Content-Type':'application/json'},
+body: JSON.stringify({ vin, email })
+});
+const cj = await create.json();
+if (cj.url) {
+window.location.href = cj.url;
+} else {
+document.getElementById('result').innerText = 'Could not create
+checkout: ' + (cj.error || JSON.stringify(cj));
+}
+});
+} catch (e) {
+document.getElementById('result').innerText = 'Error: ' + e.message;
+}
+});
+</script>
+</body>
+</html>
