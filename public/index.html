@@ -1,143 +1,56 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>VINDATA.ca – VIN Report Lookup</title>
-
+<title>VINDATA VIN Lookup</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-    body {
-        margin: 0;
-        font-family: Arial, sans-serif;
-        background: #1e1e1e;
-        color: white;
-        text-align: center;
-    }
-
-    .header {
-        background: #000;
-        padding: 20px;
-        font-size: 28px;
-        font-weight: bold;
-        border-bottom: 3px solid #00aaff;
-    }
-
-    h1 {
-        margin-top: 40px;
-        font-size: 38px;
-        font-weight: bold;
-    }
-
-    .sub {
-        font-size: 18px;
-        margin-bottom: 40px;
-        color: #bbb;
-    }
-
-    .box {
-        background: #111;
-        width: 60%;
-        margin: auto;
-        padding: 30px;
-        border-radius: 12px;
-        box-shadow: 0px 0px 15px #000;
-    }
-
-    input {
-        width: 80%;
-        padding: 14px;
-        margin: 10px 0;
-        border: none;
-        border-radius: 6px;
-        font-size: 16px;
-    }
-
-    button {
-        width: 83%;
-        padding: 14px;
-        margin-top: 10px;
-        background: #00aaff;
-        color: white;
-        font-size: 18px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-    }
-
-    button:hover {
-        background: #0088cc;
-    }
-
-    #result {
-        margin-top: 20px;
-        font-size: 18px;
-    }
+body { font-family: system-ui; max-width:700px; margin:40px auto; }
+input,button { padding:12px; font-size:16px; width:100%; margin:8px 0; }
+button { background:#0066ff; color:white; border:none; border-radius:8px; }
 </style>
 </head>
 
 <body>
+<h2>VINDATA.ca VIN Lookup</h2>
 
-<div class="header">VINDATA.ca</div>
+<input id="vin" placeholder="Enter VIN">
+<input id="email" placeholder="Enter email">
 
-<h1>VIN History Report Lookup</h1>
-<p class="sub">Instant Vehicle History Reports Only CA$3.99</p>
+<button onclick="lookup()">Check VIN</button>
 
-<div class="box">
-    <input id="vin" placeholder="Enter 17-digit VIN" />
-    <input id="email" placeholder="Enter your email" />
-
-    <button id="checkBtn">Lookup VIN</button>
-
-    <div id="result"></div>
-</div>
+<div id="result"></div>
 
 <script>
-document.getElementById("checkBtn").addEventListener("click", async () => {
-    const vin = document.getElementById("vin").value.trim();
-    const email = document.getElementById("email").value.trim();
+async function lookup(){
+  const vin = vin.value.trim();
+  const email = document.getElementById("email").value.trim();
 
-    if (!vin || !email) return alert("Enter VIN and Email");
+  const r = await fetch(`/api/lookup/${vin}`);
+  const j = await r.json();
 
-    document.getElementById("result").innerText = "Checking VIN...";
+  if(j.success){
+    result.innerHTML = `
+      <p>Make: ${j.decode.make}</p>
+      <p>Model: ${j.decode.model}</p>
+      <p>Year : ${j.decode.year}</p>
+      <button onclick="pay('${vin}','${email}')">Pay & Get Report</button>
+    `;
+  } else {
+    result.innerText = "VIN lookup failed.";
+  }
+}
 
-    try {
-        const r = await fetch(`/api/lookup/${vin}`);
-        const j = await r.json();
+async function pay(vin,email){
+  const r = await fetch("/api/create-checkout",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({vin,email})
+  });
 
-        if (!j.success) {
-            document.getElementById("result").innerText = "VIN lookup failed.";
-            return;
-        }
-
-        const dec = j.decode;
-        document.getElementById("result").innerHTML = `
-            <p><b>Make:</b> ${dec.make || "Unknown"}  
-            <b>Model:</b> ${dec.model || ""}  
-            <b>Year:</b> ${dec.year || ""}</p>
-
-            <button id="payBtn">Pay CA$3.99 & Get Full Report</button>
-        `;
-
-        document.getElementById("payBtn").addEventListener("click", async () => {
-            document.getElementById("result").innerText = "Redirecting to payment...";
-            const res = await fetch("/api/create-checkout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ vin, email })
-            });
-
-            const data = await res.json();
-            if (data.url) {
-                window.location.href = data.url;
-            } else {
-                document.getElementById("result").innerText = "Payment error.";
-            }
-        });
-
-    } catch (err) {
-        document.getElementById("result").innerText = "Error: " + err.message;
-    }
-});
+  const j = await r.json();
+  if(j.url) window.location = j.url;
+}
 </script>
 
 </body>
