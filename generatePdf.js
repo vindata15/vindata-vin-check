@@ -1,22 +1,22 @@
-// generatePdf.js (NO puppeteer, works on Render)
+// generatePdf.js - Final Carfax PDF (pdf-lib version)
+
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-export async function generatePdfFromJson(report) {
+export async function generateCarfaxPDF(report) {
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([620, 820]);
-
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+  let page = pdfDoc.addPage([620, 820]);
   let y = 780;
 
-  // Header
+  // Header bar
   page.drawRectangle({
     x: 0,
     y: 780,
     width: 620,
     height: 40,
-    color: rgb(0, 0.26, 0.55),
+    color: rgb(0, 0.25, 0.55),
   });
 
   page.drawText("VEHICLE HISTORY REPORT", {
@@ -29,13 +29,13 @@ export async function generatePdfFromJson(report) {
 
   y -= 60;
 
-  // VIN
+  // VIN block
   page.drawText("VIN:", { x: 20, y, size: 14, font: bold });
-  page.drawText(report.vin || "N/A", { x: 140, y, size: 14, font });
+  page.drawText(report.vin || "N/A", { x: 150, y, size: 14, font });
   y -= 30;
 
-  // Summary
-  page.drawText("Report Summary", {
+  // Section
+  page.drawText("Vehicle Summary", {
     x: 20,
     y,
     size: 16,
@@ -44,21 +44,50 @@ export async function generatePdfFromJson(report) {
   });
   y -= 25;
 
+  const summary = [
+    ["Make", report.make],
+    ["Model", report.model],
+    ["Year", report.year],
+    ["Trim", report.trim],
+    ["Body", report.body],
+    ["Engine", report.engine],
+  ];
+
+  summary.forEach(([label, val]) => {
+    page.drawText(label + ":", { x: 20, y, size: 12, font: bold });
+    page.drawText(val || "N/A", { x: 150, y, size: 12, font });
+    y -= 18;
+  });
+
+  y -= 20;
+
+  // Raw JSON data
+  page.drawText("Full Report Data", {
+    x: 20,
+    y,
+    size: 16,
+    font: bold,
+    color: rgb(0.2, 0.2, 0.2),
+  });
+  y -= 25;
+
   const pretty = JSON.stringify(report, null, 2).split("\n");
 
-  pretty.forEach((line) => {
+  for (const line of pretty) {
     if (y < 40) {
       page = pdfDoc.addPage([620, 820]);
       y = 780;
     }
+
     page.drawText(line.substring(0, 100), {
       x: 20,
       y,
       size: 10,
       font,
     });
+
     y -= 14;
-  });
+  }
 
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
