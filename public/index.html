@@ -1,55 +1,101 @@
 <!doctype html>
 <html>
 <head>
-<title>VINDATA VIN Lookup</title>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>VINDATA.ca VIN Lookup</title>
+
 <style>
-body { font-family: system-ui; max-width:700px; margin:40px auto; }
-input,button { padding:12px; font-size:16px; width:100%; margin:8px 0; }
-button { background:#0066ff; color:white; border:none; border-radius:8px; }
+    body {
+        font-family: system-ui, Arial;
+        background: #f5f7fb;
+        margin: 0;
+        padding: 40px;
+        text-align: center;
+    }
+
+    h1 {
+        font-size: 28px;
+        margin-bottom: 30px;
+    }
+
+    input {
+        width: 60%;
+        max-width: 600px;
+        padding: 14px;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        border: 1px solid #d0d0d0;
+        font-size: 18px;
+        background: #e8f0fe;
+    }
+
+    button {
+        width: 60%;
+        max-width: 600px;
+        padding: 14px;
+        background: #006aff;
+        color: white;
+        font-size: 18px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    button:hover {
+        background: #0053cf;
+    }
+
+    #result {
+        margin-top: 20px;
+        font-size: 16px;
+        color: red;
+    }
 </style>
 </head>
 
 <body>
-<h2>VINDATA.ca VIN Lookup</h2>
 
-<input id="vin" placeholder="Enter VIN">
-<input id="email" placeholder="Enter email">
+<h1>VINDATA.ca VIN Lookup</h1>
 
-<button onclick="lookup()">Check VIN</button>
+<input id="vin" placeholder="Enter VIN (17 digits)" />
+<input id="email" placeholder="Enter your email" />
+
+<button onclick="checkVIN()">Check VIN</button>
 
 <div id="result"></div>
 
 <script>
-async function lookup(){
-  const vin = vin.value.trim();
-  const email = document.getElementById("email").value.trim();
+async function checkVIN() {
+    const vin = document.getElementById("vin").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const result = document.getElementById("result");
 
-  const r = await fetch(`/api/lookup/${vin}`);
-  const j = await r.json();
+    if (!vin || !email) {
+        result.innerHTML = "Please enter both VIN and Email.";
+        return;
+    }
 
-  if(j.success){
-    result.innerHTML = `
-      <p>Make: ${j.decode.make}</p>
-      <p>Model: ${j.decode.model}</p>
-      <p>Year : ${j.decode.year}</p>
-      <button onclick="pay('${vin}','${email}')">Pay & Get Report</button>
-    `;
-  } else {
-    result.innerText = "VIN lookup failed.";
-  }
-}
+    result.innerHTML = "Processing...";
 
-async function pay(vin,email){
-  const r = await fetch("/api/create-checkout",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({vin,email})
-  });
+    try {
+        const response = await fetch("/create-checkout-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ vin, email })
+        });
 
-  const j = await r.json();
-  if(j.url) window.location = j.url;
+        const data = await response.json();
+
+        if (data.url) {
+            window.location.href = data.url; // Redirect to Stripe checkout
+        } else {
+            result.innerHTML = "Error: " + data.error;
+        }
+
+    } catch (err) {
+        result.innerHTML = "Request failed.";
+    }
 }
 </script>
 
