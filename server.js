@@ -1,5 +1,5 @@
 // =========================
-//  VIN DATA - FINAL VERSION
+//  VIN DATA - FINAL VERSION (FIXED)
 // =========================
 
 import express from "express";
@@ -18,10 +18,13 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// ⚠ IMPORTANT: DO NOT use express.json() before webhook!
+// instead use it only for normal routes:
+app.use("/api", express.json());
+
 app.use(express.static(path.join(__dirname, "public")));
 
-// ENV
 const {
   STRIPE_SECRET_KEY,
   STRIPE_PRICE_ID,
@@ -40,7 +43,6 @@ async function decodeVinFree(vin) {
   const r = await axios.get(
     `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
   );
-
   const results = r.data.Results || [];
   const find = (name) =>
     results.find((r) => r.Variable === name)?.Value || "";
@@ -65,7 +67,7 @@ async function fetchCarfaxReport(vin) {
   return r.data;
 }
 
-// ---------- VIN Lookup API ----------
+// ---------- VIN Lookup ----------
 app.get("/api/lookup/:vin", async (req, res) => {
   try {
     const decode = await decodeVinFree(req.params.vin);
@@ -120,16 +122,13 @@ app.post(
       const email = session.metadata.email;
 
       try {
-        // 1. Fetch Carfax report JSON
         const jsonReport = await fetchCarfaxReport(vin);
 
-        // 2. Generate PDF (pdf-lib)
         const pdf = await generateCarfaxPDF({
           vin,
           ...jsonReport,
         });
 
-        // 3. Email PDF using Resend
         await axios.post(
           "https://api.resend.com/emails",
           {
@@ -141,11 +140,15 @@ app.post(
               {
                 filename: `VIN-${vin}.pdf`,
                 content: pdf.toString("base64"),
+                type: "application/pdf"   // ✔ FIXED
               },
             ],
           },
           {
-            headers: { Authorization: `Bearer ${RESEND_API_KEY}` },
+            headers: {
+              Authorization: `Bearer ${RESEND_API_KEY}`,
+              "Content-Type": "application/json"
+            },
           }
         );
       } catch (err) {
