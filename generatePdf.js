@@ -10,7 +10,6 @@ export async function generateCarfaxPDF(report) {
   let page = pdfDoc.addPage([620, 820]);
   let y = 780;
 
-  // Header bar
   page.drawRectangle({
     x: 0,
     y: 780,
@@ -29,12 +28,10 @@ export async function generateCarfaxPDF(report) {
 
   y -= 60;
 
-  // VIN block
   page.drawText("VIN:", { x: 20, y, size: 14, font: bold });
   page.drawText(report.vin || "N/A", { x: 150, y, size: 14, font });
   y -= 30;
 
-  // Section
   page.drawText("Vehicle Summary", {
     x: 20,
     y,
@@ -61,7 +58,6 @@ export async function generateCarfaxPDF(report) {
 
   y -= 20;
 
-  // Raw JSON data
   page.drawText("Full Report Data", {
     x: 20,
     y,
