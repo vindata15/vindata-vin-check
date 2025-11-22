@@ -41,6 +41,7 @@ async function decodeVinFree(vin) {
   const r = await axios.get(
     `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
   );
+
   const results = r.data.Results || [];
   const find = (v) => results.find((r) => r.Variable === v)?.Value || "N/A";
 
@@ -48,21 +49,24 @@ async function decodeVinFree(vin) {
     vin,
     make: find("Make"),
     model: find("Model"),
-    year: find("Model Year"),
+    year: find("Model Year")
   };
 }
 
 // ------------------------------
 // FETCH CARFAX REPORT (CARSIMULCAST)
+// *** FIXED HEADERS ***
 // ------------------------------
 async function fetchCarfaxReport(vin) {
   const url = `https://connect.carsimulcast.com/getrecord/carfax/${vin}`;
+
   const r = await axios.get(url, {
     headers: {
-      "X-API-KEY": CARSIMULCAST_API_KEY,
-      "X-API-SECRET": CARSIMULCAST_API_SECRET,
+      "API-KEY": CARSIMULCAST_API_KEY,
+      "API-SECRET": CARSIMULCAST_API_SECRET,
     },
   });
+
   return r.data;
 }
 
@@ -79,7 +83,7 @@ app.get("/api/lookup/:vin", async (req, res) => {
 });
 
 // ------------------------------
-// API: Checkout session
+// API: Create Stripe Checkout
 // ------------------------------
 app.post("/api/create-checkout", async (req, res) => {
   try {
@@ -95,9 +99,9 @@ app.post("/api/create-checkout", async (req, res) => {
       metadata: { vin, email },
     });
 
-    res.json({ url: session.url });
+    return res.json({ url: session.url });
   } catch (err) {
-    res.status(500).json({ error: "Could not create checkout" });
+    return res.status(500).json({ error: "Could not create checkout" });
   }
 });
 
@@ -118,7 +122,7 @@ app.post(
         STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
-      return res.status(400).send("Webhook Error: " + err.message);
+      return res.status(400).send("Webhook error: " + err.message);
     }
 
     if (event.type === "checkout.session.completed") {
@@ -127,13 +131,16 @@ app.post(
       const email = session.metadata.email;
 
       try {
+        // 1. Fetch real data
         const report = await fetchCarfaxReport(vin);
 
+        // 2. Generate PDF
         const pdf = await generateCarfaxPDF({
           vin,
           ...report,
         });
 
+        // 3. Email report
         await axios.post(
           "https://api.resend.com/emails",
           {
@@ -150,6 +157,9 @@ app.post(
           },
           { headers: { Authorization: `Bearer ${RESEND_API_KEY}` } }
         );
+
+        console.log("Email sent successfully to", email);
+
       } catch (err) {
         console.log("Email/PDF error:", err.message);
       }
