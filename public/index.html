@@ -32,4 +32,54 @@ document.getElementById('checkBtn').addEventListener('click', async () => {
   const vin = document.getElementById('vin').value.trim();
   const email = document.getElementById('email').value.trim();
 
-  if (!vin || !email) return alert(
+  if (!vin || !email) return alert('Please enter VIN and email');
+
+  document.getElementById('result').innerText = 'Looking up VIN...';
+
+  try {
+    const r = await fetch(`/api/lookup/${encodeURIComponent(vin)}`);
+    const j = await r.json();
+
+    if (!j.success) {
+      document.getElementById('result').innerText = 'Lookup failed';
+      return;
+    }
+
+    const dec = j.decode;
+
+    document.getElementById('result').innerHTML = `
+      <p><strong>Make:</strong> ${dec.make || 'Unknown'} 
+      <strong>Model:</strong> ${dec.model || ''} 
+      <strong>Year:</strong> ${dec.year || ''}</p>
+
+      <p class="small">Price to get full Carfax report: configured in Stripe</p>
+      <button id="payBtn">Pay & Get Carfax Report</button>
+    `;
+
+    document.getElementById('payBtn').addEventListener('click', async () => {
+      document.getElementById('result').innerText = 'Creating checkout...';
+
+      const create = await fetch('/api/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin, email })
+      });
+
+      const cj = await create.json();
+
+      if (cj.url) {
+        window.location.href = cj.url;
+      } else {
+        document.getElementById('result').innerText =
+          'Could not create checkout: ' + (cj.error || JSON.stringify(cj));
+      }
+    });
+
+  } catch (e) {
+    document.getElementById('result').innerText = 'Error: ' + e.message;
+  }
+});
+</script>
+
+</body>
+</html>
