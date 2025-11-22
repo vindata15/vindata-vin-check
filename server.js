@@ -1,57 +1,130 @@
-// server.js
 import express from "express";
+import dotenv from "dotenv";
 import axios from "axios";
 import Stripe from "stripe";
-import dotenv from "dotenv";
 import cors from "cors";
+import puppeteer from "puppeteer";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { generatePdfFromHtml } from "./generatePdf.js";
-import fs from "fs";
+import path from "path";
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-
-// Needed for Stripe Webhook
-app.use(
-  "/webhook/stripe",
-  express.raw({ type: "application/json" })
-);
-
-// Normal JSON for all other routes
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-app.use(express.static(join(__dirname, "public")));
+const {
+  STRIPE_SECRET_KEY,
+  STRIPE_PRICE_ID,
+  STRIPE_WEBHOOK_SECRET,
+  RESEND_API_KEY,
+  DOMAIN = "https://vindata.ca",
+  CARSIMULCAST_API_KEY,
+  CARSIMULCAST_API_SECRET,
+  PORT = 10000
+} = process.env;
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(STRIPE_SECRET_KEY);
 
-// ------------------------------
-//  Lookup Endpoint (free NHTSA)
-// ------------------------------
+// -----------------------
+// Free VIN decode (NHTSA)
+// -----------------------
+async function decodeVinFree(vin) {
+  const resp = await axios.get(
+    `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
+  );
+  const results = resp.data.Results || [];
+  const getVar = (v) => results.find((r) => r.Variable === v)?.Value || "";
+
+  return {
+    vin,
+    make: getVar("Make"),
+    model: getVar("Model"),
+    year: getVar("Model Year")
+  };
+}
+
+// ---------------------------
+// CarSimulcast Carfax Report
+// ---------------------------
+async function fetchCarfaxReport(vin) {
+  const url = `https://connect.carsimulcast.com/getrecord/carfax/${vin}`;
+  const r = await axios.get(url, {
+    headers: {
+      "X-API-KEY": CARSIMULCAST_API_KEY,
+      "X-API-SECRET": CARSIMULCAST_API_SECRET
+    }
+  });
+  return r.data;
+}
+
+// ---------------------------
+// Generate PDF via Puppeteer
+// ---------------------------
+async function generatePDF(jsonData) {
+  const browser = await puppeteer.launch({
+    headless: "new",
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+
+  const page = await browser.newPage();
+
+  // Construct HTML
+  const html = `
+  <html>
+  <head>
+    <style>
+      body { font-family: Arial; padding: 20px; }
+      h1 { color: #004aad; }
+      .section { margin-bottom: 20px; }
+      .box { background:#f4f4f4; padding:10px; border-radius:8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Vehicle History Report</h1>
+    <p><b>VIN:</b> ${jsonData.vin || "N/A"}</p>
+
+    <div class="section">
+      <h2>Raw Report Data</h2>
+      <div class="box">
+        <pre>${JSON.stringify(jsonData, null, 2)}</pre>
+      </div>
+    </div>
+  </body>
+  </html>
+  `;
+
+  await page.setContent(html, { waitUntil: "networkidle0" });
+
+  const pdfBuffer = await page.pdf({
+    format: "A4",
+    printBackground: true
+  });
+
+  await browser.close();
+  return pdfBuffer;
+}
+
+// ---------------------------
+// API: Lookup
+// ---------------------------
 app.get("/api/lookup/:vin", async (req, res) => {
   try {
-    const vin = req.params.vin;
-    const apiUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`;
-
-    const response = await axios.get(apiUrl);
-    const data = response.data.Results;
-
-    const make = data.find((r) => r.Variable === "Make")?.Value || "";
-    const model = data.find((r) => r.Variable === "Model")?.Value || "";
-    const year = data.find((r) => r.Variable === "Model Year")?.Value || "";
-
-    res.json({ success: true, vin, decode: { make, model, year } });
-  } catch (err) {
-    res.json({ success: false, error: err.message });
+    const decode = await decodeVinFree(req.params.vin);
+    res.json({ success: true, decode });
+  } catch (e) {
+    res.status(500).json({ success: false, error: "Lookup failed" });
   }
 });
 
-// ------------------------------
-//  Create Stripe Checkout
-// ------------------------------
+// ---------------------------
+// API: Create Stripe Checkout
+// ---------------------------
 app.post("/api/create-checkout", async (req, res) => {
   try {
     const { vin, email } = req.body;
@@ -59,114 +132,77 @@ app.post("/api/create-checkout", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
-      line_items: [
-        { price: process.env.STRIPE_PRICE_ID, quantity: 1 }
-      ],
-      success_url: `${process.env.DOMAIN}/success.html?vin=${vin}`,
-      cancel_url: `${process.env.DOMAIN}?cancelled=1`,
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      success_url: `${DOMAIN}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${DOMAIN}/`,
       customer_email: email,
-      metadata: { vin, email },
+      metadata: { vin, email }
     });
 
     res.json({ url: session.url });
-  } catch (err) {
-    console.error("Stripe error:", err.message);
-    res.json({ error: err.message });
+  } catch (error) {
+    res.status(500).json({ error: "Checkout failed" });
   }
 });
 
-// ------------------------------
-//  STRIPE WEBHOOK
-// ------------------------------
-app.post("/webhook/stripe", async (req, res) => {
-  const sig = req.headers["stripe-signature"];
-  let event;
+// ---------------------------
+// Stripe Webhook
+// ---------------------------
+app.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
 
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.log("Webhook signature failed:", err.message);
-    return res.status(400).send("Invalid signature");
-  }
-
-  // PAYMENT SUCCESS
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const vin = session.metadata.vin;
-    const email = session.metadata.email;
-
-    console.log("✔ Payment successful for", vin);
-
+    let event;
     try {
-      // ------------------------------
-      // 1. Fetch CarSimulcast HTML Report
-      // ------------------------------
-      const htmlResp = await axios.get(
-        `https://connect.carsimulcast.com/getrecord/html/${vin}`,
-        {
-          headers: {
-            "API-KEY": process.env.CARSIMULCAST_API_KEY,
-            "API-SECRET": process.env.CARSIMULCAST_API_SECRET,
-          },
-        }
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        STRIPE_WEBHOOK_SECRET
       );
-
-      const reportHtml = htmlResp.data;
-
-      // ------------------------------
-      // 2. Convert HTML → PDF via Puppeteer
-      // ------------------------------
-      const pdfPath = `/tmp/${vin}.pdf`;
-      await generatePdfFromHtml(reportHtml, pdfPath);
-
-      // ------------------------------
-      // 3. Send Email with PDF (Resend)
-      // ------------------------------
-      const fileData = fs.readFileSync(pdfPath);
-
-      await axios.post(
-        "https://api.resend.com/emails",
-        {
-          from: `no-reply@vindata.ca`,
-          to: email,
-          subject: `Your Vehicle Report for VIN ${vin}`,
-          html: `
-            <p>Hello,</p>
-            <p>Your complete Carfax-style vehicle history report is attached.</p>
-            <p>Thank you for using <strong>VINDATA.ca</strong>.</p>
-          `,
-          attachments: [
-            {
-              filename: `${vin}.pdf`,
-              content: fileData.toString("base64"),
-            },
-          ],
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      console.log("📩 PDF emailed:", email);
     } catch (err) {
-      console.error("ERROR generating/sending PDF:", err);
+      return res.status(400).send(`Webhook error: ${err.message}`);
     }
+
+    if (event.type === "checkout.session.completed") {
+      const s = event.data.object;
+      const vin = s.metadata.vin;
+      const email = s.metadata.email;
+
+      try {
+        const jsonData = await fetchCarfaxReport(vin);
+
+        const pdf = await generatePDF(jsonData);
+
+        await axios.post(
+          "https://api.resend.com/emails",
+          {
+            from: "no-reply@vindata.ca",
+            to: [email],
+            subject: `Your VIN Report: ${vin}`,
+            html: `<p>Your PDF report is attached.</p>`,
+            attachments: [
+              {
+                filename: `VIN-${vin}.pdf`,
+                content: pdf.toString("base64")
+              }
+            ]
+          },
+          { headers: { Authorization: `Bearer ${RESEND_API_KEY}` } }
+        );
+      } catch (error) {
+        console.log("Failed to email report:", error);
+      }
+    }
+
+    res.json({ received: true });
   }
-
-  res.json({ received: true });
-});
-
-// Health Check
-app.get("/_health", (req, res) => res.json({ ok: true }));
-
-// Start Server
-app.listen(process.env.PORT || 3000, () =>
-  console.log("Server running")
 );
+
+// ---------------------------
+// Health
+// ---------------------------
+app.get("/_health", (req, res) => res.send("OK"));
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
