@@ -1,5 +1,5 @@
 // =========================
-//  VIN DATA - FINAL VERSION (FIXED)
+//  VIN DATA - FINAL VERSION
 // =========================
 
 import express from "express";
@@ -18,11 +18,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-
-// ⚠ IMPORTANT: DO NOT use express.json() before webhook!
-// instead use it only for normal routes:
-app.use("/api", express.json());
-
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const {
@@ -33,19 +29,20 @@ const {
   DOMAIN = "https://vindata.ca",
   CARSIMULCAST_API_KEY,
   CARSIMULCAST_API_SECRET,
-  PORT = 10000
+  PORT = 10000,
 } = process.env;
 
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 
-// ---------- NHTSA VIN DECODE ----------
+// ------------------------------
+// FREE VIN DECODER (NHTSA)
+// ------------------------------
 async function decodeVinFree(vin) {
   const r = await axios.get(
     `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
   );
   const results = r.data.Results || [];
-  const find = (name) =>
-    results.find((r) => r.Variable === name)?.Value || "";
+  const find = (v) => results.find((r) => r.Variable === v)?.Value || "N/A";
 
   return {
     vin,
@@ -55,7 +52,9 @@ async function decodeVinFree(vin) {
   };
 }
 
-// ---------- FETCH CARFAX REPORT ----------
+// ------------------------------
+// FETCH CARFAX REPORT (CARSIMULCAST)
+// ------------------------------
 async function fetchCarfaxReport(vin) {
   const url = `https://connect.carsimulcast.com/getrecord/carfax/${vin}`;
   const r = await axios.get(url, {
@@ -67,7 +66,9 @@ async function fetchCarfaxReport(vin) {
   return r.data;
 }
 
-// ---------- VIN Lookup ----------
+// ------------------------------
+// API: Lookup VIN (free)
+// ------------------------------
 app.get("/api/lookup/:vin", async (req, res) => {
   try {
     const decode = await decodeVinFree(req.params.vin);
@@ -77,7 +78,9 @@ app.get("/api/lookup/:vin", async (req, res) => {
   }
 });
 
-// ---------- Stripe Checkout ----------
+// ------------------------------
+// API: Checkout session
+// ------------------------------
 app.post("/api/create-checkout", async (req, res) => {
   try {
     const { vin, email } = req.body;
@@ -92,13 +95,15 @@ app.post("/api/create-checkout", async (req, res) => {
       metadata: { vin, email },
     });
 
-    return res.json({ url: session.url });
+    res.json({ url: session.url });
   } catch (err) {
-    return res.status(500).json({ error: "Could not create checkout" });
+    res.status(500).json({ error: "Could not create checkout" });
   }
 });
 
-// ---------- Stripe Webhook ----------
+// ------------------------------
+// STRIPE WEBHOOK
+// ------------------------------
 app.post(
   "/webhook",
   express.raw({ type: "application/json" }),
@@ -113,7 +118,7 @@ app.post(
         STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
-      return res.status(400).send("Webhook error: " + err.message);
+      return res.status(400).send("Webhook Error: " + err.message);
     }
 
     if (event.type === "checkout.session.completed") {
@@ -122,11 +127,11 @@ app.post(
       const email = session.metadata.email;
 
       try {
-        const jsonReport = await fetchCarfaxReport(vin);
+        const report = await fetchCarfaxReport(vin);
 
         const pdf = await generateCarfaxPDF({
           vin,
-          ...jsonReport,
+          ...report,
         });
 
         await axios.post(
@@ -134,22 +139,16 @@ app.post(
           {
             from: "no-reply@vindata.ca",
             to: [email],
-            subject: `Your VIN Report – ${vin}`,
-            html: `<p>Your vehicle history report is attached.</p>`,
+            subject: `Your Vehicle History Report – ${vin}`,
+            html: `<p>Your Carfax-style vehicle history report is attached.</p>`,
             attachments: [
               {
                 filename: `VIN-${vin}.pdf`,
                 content: pdf.toString("base64"),
-                type: "application/pdf"   // ✔ FIXED
               },
             ],
           },
-          {
-            headers: {
-              Authorization: `Bearer ${RESEND_API_KEY}`,
-              "Content-Type": "application/json"
-            },
-          }
+          { headers: { Authorization: `Bearer ${RESEND_API_KEY}` } }
         );
       } catch (err) {
         console.log("Email/PDF error:", err.message);
@@ -160,7 +159,7 @@ app.post(
   }
 );
 
-// ---------- Health ----------
+// ------------------------------
 app.get("/_health", (req, res) => res.send("OK"));
 
 app.listen(PORT, () => console.log("Server running on port", PORT));
